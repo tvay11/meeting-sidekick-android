@@ -22,11 +22,16 @@ Java_com_meetingsidekick_app_WhisperNative_load(JNIEnv *env, jobject, jstring pa
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_meetingsidekick_app_WhisperNative_transcribe(JNIEnv *env, jobject, jlong handle, jfloatArray audio) {
+Java_com_meetingsidekick_app_WhisperNative_transcribe(JNIEnv *env, jobject, jlong handle, jfloatArray audio, jint audio_context) {
     auto *context = reinterpret_cast<whisper_context *>(handle);
     const auto count = env->GetArrayLength(audio);
     if (!context || count < 1600 || count > 30 * 16000) {
         fail(env, "Invalid audio window.");
+        return nullptr;
+    }
+    if (audio_context != 0 && (audio_context != 768 || count > 8 * 16000 ||
+            audio_context > whisper_model_n_audio_ctx(context))) {
+        fail(env, "Invalid live audio context.");
         return nullptr;
     }
     std::vector<float> samples(count);
@@ -34,6 +39,8 @@ Java_com_meetingsidekick_app_WhisperNative_transcribe(JNIEnv *env, jobject, jlon
     if (env->ExceptionCheck()) return nullptr;
     auto params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.n_threads = 4;
+    // Short live clips can use less encoder context; file imports keep the default.
+    params.audio_ctx = audio_context;
     params.language = "en";
     params.translate = false;
     params.no_context = true;

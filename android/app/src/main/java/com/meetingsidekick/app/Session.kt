@@ -11,7 +11,9 @@ data class SessionState(
     val transcript: String = "",
     val level: Float = 0f,
     val error: String? = null,
-    val lagged: Boolean = false,
+    val droppedClips: Int = 0,
+    val lastInferenceMs: Long = 0,
+    val transcriptDelayMs: Long = 0,
 )
 
 object Session {

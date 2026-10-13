@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -32,6 +33,7 @@ import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,6 +53,7 @@ class MainActivity : ComponentActivity() {
         val model by vm.modelReady.collectAsStateWithLifecycle()
         var settingsOpen by rememberSaveable { mutableStateOf(!vm.settings.hasApiKey()) }
         var playback by rememberSaveable { mutableStateOf(true) }
+        var fastLive by rememberSaveable { mutableStateOf(vm.settings.fastLive()) }
         var question by rememberSaveable { mutableStateOf("") }
         var context by rememberSaveable { mutableStateOf("") }
         var showContext by rememberSaveable { mutableStateOf(false) }
@@ -62,7 +65,8 @@ class MainActivity : ComponentActivity() {
             try {
                 Session.update { it.copy(active = true, status = "Starting…", error = null) }
                 ContextCompat.startForegroundService(this, Intent(this, CaptureService::class.java)
-                    .putExtra("playback", playback).apply { projection?.let { putExtra("projection", it) } })
+                    .putExtra("playback", playback).putExtra("fastLive", fastLive)
+                    .apply { projection?.let { putExtra("projection", it) } })
             } catch (e: Exception) {
                 Session.update { it.copy(active = false, error = e.message ?: "Could not start capture.") }
             }
@@ -95,6 +99,16 @@ class MainActivity : ComponentActivity() {
                             FilterChip(selected = !playback, onClick = { playback = false }, enabled = !session.active && !session.busy, label = { Text("Microphone") })
                         }
                         Text(if (playback) "Captures audio that other apps allow. Teams call audio may be unavailable." else "Listens through the tablet microphone. Another call may take priority.", style = MaterialTheme.typography.bodySmall)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Faster live mode")
+                                Text("Lower processing cost; may reduce accuracy.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Switch(checked = fastLive, enabled = !session.active && !session.busy, onCheckedChange = { enabled ->
+                                try { vm.settings.saveFastLive(enabled); fastLive = enabled }
+                                catch (e: Exception) { Session.update { it.copy(error = "Could not save transcription preference.") } }
+                            })
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Button(onClick = {
                                 val requested = mutableListOf(Manifest.permission.RECORD_AUDIO)
@@ -105,7 +119,12 @@ class MainActivity : ComponentActivity() {
                         }
                         if (!model) Text("Import a Whisper model below to get started.", color = MaterialTheme.colorScheme.primary)
                         session.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                        if (session.lagged) Text("Whisper fell behind. Some audio was skipped; try a smaller model.", color = MaterialTheme.colorScheme.error)
+                        if (session.lastInferenceMs > 0) {
+                            Text(String.format(Locale.getDefault(), "Last 8-second clip: %.1f s to transcribe · %.1f s behind when completed",
+                                session.lastInferenceMs / 1000.0, session.transcriptDelayMs / 1000.0), style = MaterialTheme.typography.bodySmall)
+                            if (session.lastInferenceMs > LiveAudio.STEP_MS) Text("This model is processing slower than audio arrives. Try tiny.en for live meetings.", color = MaterialTheme.colorScheme.error)
+                        }
+                        if (session.droppedClips > 0) Text("Earlier clips skipped: ${session.droppedClips}. If this count increases, switch to tiny.en.", color = MaterialTheme.colorScheme.error)
                     }
                 }
                 Surface(shape = MaterialTheme.shapes.large) {
@@ -139,6 +158,10 @@ class MainActivity : ComponentActivity() {
                     OutlinedButton(onClick = { modelPicker.launch(arrayOf("*/*")) }, enabled = !session.active && !session.busy) { Text(if (model) "Replace model" else "Import model") }
                     OutlinedButton(onClick = { audioPicker.launch(arrayOf("audio/*", "application/octet-stream")) }, enabled = model && !session.active && !session.busy) { Text("Import WAV") }
                 }
+                TextButton(onClick = {
+                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin?download=true"))) }
+                    catch (e: Exception) { Session.update { it.copy(error = "Open the project README in your browser for the tiny.en model download.") } }
+                }) { Text("Download tiny.en for faster live transcription") }
                 Text("Audio stays on this tablet. Suggest reply sends the transcript, question, and context directly to DeepSeek.", style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = { vm.clear(); question = ""; context = "" }, enabled = !session.active && !session.busy) { Text("Clear session") }
                 Spacer(Modifier.height(12.dp))

@@ -12,6 +12,10 @@ import javax.crypto.spec.GCMParameterSpec
 
 class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("connection", Context.MODE_PRIVATE)
+    fun fastLive() = prefs.getBoolean("fast_live", true)
+    fun saveFastLive(enabled: Boolean) {
+        check(prefs.edit().putBoolean("fast_live", enabled).commit()) { "Could not save transcription preference." }
+    }
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey("sidekick-access", null) as? SecretKey)?.let { return it }

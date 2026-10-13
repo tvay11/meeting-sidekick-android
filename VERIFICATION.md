@@ -1,3 +1,13 @@
+# v0.3.0 verification — 2026-10-13
+
+- User reported base.en falling behind during live transcription. The previous app used full encoder context for short clips and discarded waiting audio when its one-slot queue filled.
+- Added Faster live mode (on by default): 768 encoder frames for live clips of at most eight seconds, compared with the normal model context of 1500. This uses whisper.cpp's experimental `audio_ctx` option and may reduce accuracy; the user can disable it. File transcription retains the default context. No tablet speedup or accuracy improvement is claimed.
+- Three waiting clips now absorb transient stalls. The queue remains bounded, discards the oldest pending clip only when full, and reports a cumulative actual drop count. Added last inference duration and completed-transcript delay for diagnosis, plus a direct tiny.en download button.
+- Regression tests first reproduced the one-slot-buffer loss (three expected failures), then passed with the changes. Final Android suite: 18 passed. Covers FIFO retention during a stall, bounded overflow/drop counts, consumer wakeup/cancellation, and live/file context boundaries, in addition to existing audio and provider tests.
+- Android tests, native/Java/Kotlin APK build, and lint passed. Lint: zero errors, 8 warnings.
+- APK signature verified and matches v0.2.0. Version code 3 / version 0.3.0, ARM64. APK size: 27,670,157 bytes. SHA-256: `56ecb978b2984583ef954b3b8aa97ece80704cacef5cfbdbe7938e325fddc6a0`.
+- Reviewed synchronization, bounded memory, explicit overflow accounting, JNI argument validation, persistent speed preference, and native context selection. No physical device/emulator or real speech inference was available; model speed, accuracy, thermal behavior, UI, and sustained Teams usage still require testing on the tablet.
+
 # v0.2.0 verification — 2026-10-13
 
 - The app now accepts a DeepSeek API key in Android Settings and calls DeepSeek directly over HTTPS. A computer, Docker, backend URL, and separate access token are no longer required.

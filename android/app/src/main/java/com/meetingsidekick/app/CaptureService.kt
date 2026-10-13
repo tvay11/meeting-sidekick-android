@@ -11,7 +11,6 @@ import android.media.projection.MediaProjectionManager
 import android.os.*
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.Channel
 import java.io.File
 import kotlin.math.sqrt
 
@@ -31,6 +30,7 @@ class CaptureService : Service() {
         try {
             check(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) { "Microphone permission is required." }
             val playback = intent.getBooleanExtra("playback", false)
+            val fastLive = intent.getBooleanExtra("fastLive", true)
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel("capture", "Active transcription", NotificationManager.IMPORTANCE_LOW))
             val stop = PendingIntent.getService(this, 1, Intent(this, CaptureService::class.java).setAction("stop"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -51,11 +51,12 @@ class CaptureService : Service() {
                 projection = getSystemService(MediaProjectionManager::class.java).getMediaProjection(Activity.RESULT_OK, data)
                 projection!!.registerCallback(projectionCallback, Handler(Looper.getMainLooper()))
             }
-            Session.update { it.copy(active = true, status = "Loading Whisper…", error = null, lagged = false) }
+            Session.update { it.copy(active = true, status = "Loading Whisper…", error = null,
+                droppedClips = 0, lastInferenceMs = 0, transcriptDelayMs = 0) }
             job = scope.launch {
                 try {
                     WhisperEngine(File(filesDir, "whisper.bin")).use { engine ->
-                        capture(engine, playback)
+                        capture(engine, playback, fastLive)
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -83,7 +84,7 @@ class CaptureService : Service() {
         return START_NOT_STICKY
     }
 
-    private suspend fun capture(engine: WhisperEngine, playback: Boolean) = coroutineScope {
+    private suspend fun capture(engine: WhisperEngine, playback: Boolean, fastLive: Boolean) = coroutineScope {
         ensureActive()
         val rate = 48000
         val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -102,19 +103,23 @@ class CaptureService : Service() {
         val audio = builder.build()
         recorder = audio
         check(audio.state == AudioRecord.STATE_INITIALIZED) { "Audio input could not be initialized." }
-        val windows = Channel<FloatArray>(1)
+        val windows = AudioBacklog()
         val inference = launch {
-            for (window in windows) {
+            while (isActive) {
+                val window = windows.next()
                 ensureActive()
                 Session.update { it.copy(status = "Transcribing…") }
-                val text = engine.transcribe(window)
+                val started = SystemClock.elapsedRealtime()
+                val text = engine.transcribe(window.samples, fastLive)
+                val finished = SystemClock.elapsedRealtime()
                 ensureActive()
                 Session.append(text)
-                Session.update { it.copy(status = "Listening") }
+                Session.update { it.copy(status = "Listening", lastInferenceMs = finished - started,
+                    transcriptDelayMs = finished - window.capturedAtMs) }
             }
         }
         val chunk = ShortArray(4800)
-        val window = FloatArray(8 * 16000)
+        val window = FloatArray(LiveAudio.WINDOW_SAMPLES)
         var used = 0
         var silenceSince = SystemClock.elapsedRealtime()
         audio.startRecording()
@@ -137,19 +142,17 @@ class CaptureService : Service() {
                     if (used == window.size) {
                         val energy = window.fold(0.0) { total, sample -> total + sample * sample } / window.size
                         if (energy > 0.000009) {
-                            if (windows.trySend(window.copyOf()).isFailure) {
-                                windows.tryReceive()
-                                windows.trySend(window.copyOf())
-                                Session.update { it.copy(lagged = true) }
+                            if (windows.offer(AudioWindow(window.copyOf(), SystemClock.elapsedRealtime()))) {
+                                Session.update { it.copy(droppedClips = it.droppedClips + 1) }
                             }
                         }
-                        window.copyInto(window, 0, window.size - 16000, window.size)
-                        used = 16000
+                        window.copyInto(window, 0, window.size - LiveAudio.OVERLAP_SAMPLES, window.size)
+                        used = LiveAudio.OVERLAP_SAMPLES
                     }
                 }
             }
         } finally {
-            windows.close(); inference.cancelAndJoin()
+            inference.cancelAndJoin()
         }
     }
 
