@@ -1,0 +1,71 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+      - run: pip install -r backend/requirements.lock.txt
+      - run: python -m pytest backend/tests scripts/tests -q
+      - name: Build backend container
+        run: docker build -t sidekick-backend .
+      - name: Check container health with test-only credentials
+        shell: bash
+        run: |
+          docker run --detach --name sidekick-check --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
+            -e DEEPSEEK_API_KEY=test-provider-key \
+            -e APP_ACCESS_TOKEN=test-only-access-token-for-ci \
+            sidekick-backend
+          trap 'docker rm -f sidekick-check' EXIT
+          for attempt in {1..15}; do
+            if docker exec sidekick-check python -c "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs sidekick-check
+          exit 1
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - name: Install Android build tools
+        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.1.10909125' 'cmake;3.22.1'
+      - name: Test, build, and lint
+        working-directory: android
+        run: bash gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --no-daemon --max-workers=2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: meeting-sidekick-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: android-checks
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest/
+            android/app/build/reports/lint-results-debug.*
+          if-no-files-found: warn

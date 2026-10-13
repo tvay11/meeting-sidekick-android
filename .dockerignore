@@ -1,0 +1,14 @@
+.git
+.tools
+.venv
+.pytest_cache
+android
+dist
+models
+**/__pycache__
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+**/*.keystore
+**/*.jks

@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set DEEPSEEK_API_KEY in .env}
+      APP_ACCESS_TOKEN: ${APP_ACCESS_TOKEN:?Set APP_ACCESS_TOKEN in .env}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
