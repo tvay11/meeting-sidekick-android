@@ -96,6 +96,9 @@ class CaptureService : Service() {
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA).addMatchingUsage(AudioAttributes.USAGE_GAME)
                 .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN).build())
         } else builder.setAudioSource(MediaRecorder.AudioSource.MIC)
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            error("Microphone permission was removed. Allow it again to record audio.")
+        }
         val audio = builder.build()
         recorder = audio
         check(audio.state == AudioRecord.STATE_INITIALIZED) { "Audio input could not be initialized." }

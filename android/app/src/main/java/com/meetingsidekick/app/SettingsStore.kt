@@ -20,19 +20,22 @@ class SettingsStore(context: Context) {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    fun url() = prefs.getString("url", "") ?: ""
-    fun token(): String {
-        val encoded = prefs.getString("token", null) ?: return ""
+    fun hasApiKey() = prefs.contains("deepseek_api_key")
+    fun apiKey(): String {
+        val encoded = prefs.getString("deepseek_api_key", null) ?: return ""
         val bytes = Base64.decode(encoded, Base64.NO_WRAP)
-        require(bytes.size > 12) { "Saved token is invalid. Enter it again." }
+        require(bytes.size > 12) { "Saved API key could not be read. Enter it again in Settings." }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
         return cipher.doFinal(bytes.copyOfRange(12, bytes.size)).toString(Charsets.UTF_8)
     }
-    fun save(url: String, token: String) {
+    fun save(apiKey: String) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
-        val encoded = Base64.encodeToString(cipher.iv + cipher.doFinal(token.toByteArray()), Base64.NO_WRAP)
-        check(prefs.edit().putString("url", url.trim().trimEnd('/')).putString("token", encoded).commit()) { "Could not save connection settings." }
+        val encoded = Base64.encodeToString(cipher.iv + cipher.doFinal(apiKey.trim().toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+        check(prefs.edit().putString("deepseek_api_key", encoded).remove("url").remove("token").commit()) { "Could not save API key." }
+    }
+    fun clearApiKey() {
+        check(prefs.edit().remove("deepseek_api_key").remove("url").remove("token").commit()) { "Could not remove API key." }
     }
 }

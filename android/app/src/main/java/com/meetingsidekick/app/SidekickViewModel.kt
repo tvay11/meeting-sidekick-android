@@ -30,7 +30,8 @@ class SidekickViewModel(application: Application) : AndroidViewModel(application
     private var generation = 0
     private fun modelFile() = File(getApplication<Application>().filesDir, "whisper.bin")
 
-    fun saveSettings(url: String, token: String) { client.validate(url, token); settings.save(url, token) }
+    fun saveSettings(apiKey: String) { client.validate(apiKey); settings.save(apiKey); cancelReply() }
+    fun removeApiKey() { settings.clearApiKey(); cancelReply() }
 
     fun suggest(question: String, context: String) {
         if (question.isBlank() && Session.state.value.transcript.isBlank()) {
@@ -41,7 +42,9 @@ class SidekickViewModel(application: Application) : AndroidViewModel(application
         mutableReply.value = ReplyState(loading = true, requestId = id)
         replyJob = viewModelScope.launch {
             try {
-                client.reply(settings.url(), settings.token(), Session.state.value.transcript, question, context) { text ->
+                val apiKey = try { settings.apiKey() }
+                    catch (e: Exception) { error("Saved API key could not be read. Enter it again in Settings.") }
+                client.reply(apiKey, Session.state.value.transcript, question, context) { text ->
                     mutableReply.update { if (it.requestId == id && it.loading) it.copy(answer = (it.answer + text).take(10000)) else it }
                 }
             } catch (e: CancellationException) { throw e }

@@ -27,6 +27,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -47,7 +49,7 @@ class MainActivity : ComponentActivity() {
         val session by Session.state.collectAsStateWithLifecycle()
         val reply by vm.reply.collectAsStateWithLifecycle()
         val model by vm.modelReady.collectAsStateWithLifecycle()
-        var settingsOpen by rememberSaveable { mutableStateOf(false) }
+        var settingsOpen by rememberSaveable { mutableStateOf(!vm.settings.hasApiKey()) }
         var playback by rememberSaveable { mutableStateOf(true) }
         var question by rememberSaveable { mutableStateOf("") }
         var context by rememberSaveable { mutableStateOf("") }
@@ -120,7 +122,9 @@ class MainActivity : ComponentActivity() {
                         OutlinedTextField(value = question, onValueChange = { question = it.take(2000) }, label = { Text("Question (optional)") },
                             placeholder = { Text("Use the latest question in the transcript") }, modifier = Modifier.fillMaxWidth(), maxLines = 4)
                         if (reply.loading) OutlinedButton(onClick = vm::cancelReply) { Text("Cancel reply") }
-                        else Button(onClick = { vm.suggest(question, context) }, modifier = Modifier.fillMaxWidth(), enabled = question.isNotBlank() || session.transcript.isNotBlank()) { Text("Suggest reply") }
+                        else Button(onClick = {
+                            if (vm.settings.hasApiKey()) vm.suggest(question, context) else settingsOpen = true
+                        }, modifier = Modifier.fillMaxWidth(), enabled = question.isNotBlank() || session.transcript.isNotBlank()) { Text("Suggest reply") }
                         TextButton(onClick = { showContext = !showContext }) { Text(if (showContext) "Hide meeting context" else "Add meeting context") }
                         if (showContext) OutlinedTextField(value = context, onValueChange = { context = it.take(4000) }, label = { Text("What should the assistant know?") }, modifier = Modifier.fillMaxWidth(), maxLines = 6)
                     }
@@ -135,7 +139,7 @@ class MainActivity : ComponentActivity() {
                     OutlinedButton(onClick = { modelPicker.launch(arrayOf("*/*")) }, enabled = !session.active && !session.busy) { Text(if (model) "Replace model" else "Import model") }
                     OutlinedButton(onClick = { audioPicker.launch(arrayOf("audio/*", "application/octet-stream")) }, enabled = model && !session.active && !session.busy) { Text("Import WAV") }
                 }
-                Text("Audio stays local. Suggest reply sends the visible transcript and your context to your backend and DeepSeek.", style = MaterialTheme.typography.bodySmall)
+                Text("Audio stays on this tablet. Suggest reply sends the transcript, question, and context directly to DeepSeek.", style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = { vm.clear(); question = ""; context = "" }, enabled = !session.active && !session.busy) { Text("Clear session") }
                 Spacer(Modifier.height(12.dp))
             }
@@ -144,24 +148,32 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun ConnectionDialog(vm: SidekickViewModel, close: () -> Unit) {
-        var url by remember { mutableStateOf(vm.settings.url()) }
-        var token by remember { mutableStateOf("") }
+        var apiKey by remember { mutableStateOf("") }
+        var saved by remember { mutableStateOf(vm.settings.hasApiKey()) }
         var error by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(Unit) {
-            try { token = vm.settings.token() }
-            catch (e: Exception) { error = "Saved token could not be read. Enter it again." }
+            try { apiKey = vm.settings.apiKey() }
+            catch (e: Exception) { error = "Saved API key could not be read. Paste it again." }
         }
-        AlertDialog(onDismissRequest = close, title = { Text("Connect to your backend") }, text = {
+        AlertDialog(onDismissRequest = close, title = { Text("DeepSeek API key") },
+            properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn), text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Your DeepSeek API key belongs on the backend. Enter its separate access token here.")
-                OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("Backend URL") }, placeholder = { Text("https://your-backend.example") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                OutlinedTextField(value = token, onValueChange = { token = it }, label = { Text("Backend access token") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-                Text("For USB testing: http://127.0.0.1:8000 after adb reverse. See the project README.", style = MaterialTheme.typography.bodySmall)
+                Text("Paste your key from your DeepSeek account. No computer or separate server is needed.")
+                OutlinedTextField(value = apiKey, onValueChange = { apiKey = it.take(512); error = null },
+                    label = { Text("DeepSeek API key") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrect = false))
+                Text("Stored encrypted on this tablet. Suggest reply sends text directly to DeepSeek and uses your API balance.", style = MaterialTheme.typography.bodySmall)
+                if (saved) TextButton(onClick = {
+                    try { vm.removeApiKey(); apiKey = ""; saved = false; error = null }
+                    catch (e: Exception) { error = "Could not remove API key. Please retry." }
+                }) { Text("Remove saved key") }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         }, confirmButton = { TextButton(onClick = {
-            try { vm.saveSettings(url, token); close() }
-            catch (e: Exception) { error = e.message ?: "Could not save settings." }
+            try { vm.saveSettings(apiKey); close() }
+            catch (e: IllegalArgumentException) { error = e.message }
+            catch (e: Exception) { error = "Could not save API key. Please retry." }
         }) { Text("Save") } }, dismissButton = { TextButton(onClick = close) { Text("Cancel") } })
     }
 }

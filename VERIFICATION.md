@@ -1,4 +1,14 @@
-# Verification — 2026-10-13
+# v0.2.0 verification — 2026-10-13
+
+- The app now accepts a DeepSeek API key in Android Settings and calls DeepSeek directly over HTTPS. A computer, Docker, backend URL, and separate access token are no longer required.
+- Android unit tests: 14 passed (six audio/transcript tests plus eight direct-provider tests). Tests cover fixed destination, authorization, bounded input/output, fragmented Unicode streaming, malformed/early-ended streams, redirect refusal, error sanitization, and cancellation. Provider traffic was mocked locally; no real key was used.
+- `:app:testDebugUnitTest :app:assembleDebug :app:lintDebug` completed successfully. Lint: zero errors, eight existing warnings. Lint identified a missing permission recheck immediately before AudioRecord construction; that guard is now present and lint passes.
+- Signature verified with apksigner. The certificate matches the v0.1.0 downloadable release, allowing an in-place update. Version code is 2; version name is 0.2.0; ABI is ARM64; min API 29 and target API 34.
+- Release APK: 27,842,973 bytes; SHA-256 `e52169e3ee83038c54d37e2ae6898557f71927e02751e45b61a51e56fa670f06`.
+- Reviewed: encrypted key storage, distinct storage from old backend tokens, saved-key removal, masked input, no key in saved UI state, backup exclusion, screenshot protection on key dialog, and removal of obsolete cleartext networking exceptions.
+- No physical-device or emulator testing was performed. Key persistence, UI layout, actual paid API calls, microphone/Teams access, and Whisper inference on the tablet still need device testing. Unit tests do not verify Android Keystore behavior on hardware.
+
+# v0.1.0 historical verification — 2026-10-13
 
 ## Delivered
 
